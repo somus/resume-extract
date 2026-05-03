@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - run: bun run typecheck
+
+      - run: bun run check
+
+      - name: Cache model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: ./model
+          key: resume-ner-model-v1
+
+      - name: Download model
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          pip install huggingface_hub[hf_xet]
+          hf download oksomu/resume-ner --local-dir ./model
+
+      - run: bun run test
+        env:
+          MODEL_PATH: ./model

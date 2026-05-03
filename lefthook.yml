@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    check:
+      glob: "*.{ts,json}"
+      run: bunx biome check --staged
+    typecheck:
+      run: bun run typecheck
+    test:
+      run: bun test
