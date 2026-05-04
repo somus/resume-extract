@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { computeATSScore, parseResume } from "./index";
 import { resetRuntimeStateForTests } from "./runtime";
 
 const MODEL = process.env.MODEL_PATH || resolve(import.meta.dir, "../../resume-ner");
+const HAS_MODEL = !process.env.CI && existsSync(join(MODEL, "resume_config.json"));
 
 const mockedResults: Array<{
 	entity?: string;
@@ -152,7 +153,7 @@ function writeMockModelDir(): string {
 	return dir;
 }
 
-describe("parseResume", () => {
+describe.skipIf(!HAS_MODEL)("parseResume", () => {
 	test("parses clean structured resume text", async () => {
 		const text = `Rajesh Kumar
 rajesh.kumar@gmail.com | +91 98765 43210 | Bangalore, India

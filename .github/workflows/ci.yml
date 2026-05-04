@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ./model
-          key: resume-ner-model-v1
+          key: resume-ner-model-v2
 
       - name: Download model
         if: steps.cache-model.outputs.cache-hit != 'true'
