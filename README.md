@@ -1,16 +1,18 @@
 # resume-extract
 
-Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts structured data from resume text in ~15ms via ONNX inference.
+Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts structured data from resume text, PDF, or DOCX via local document parsing + ONNX inference.
 
 ## Features
 
 - **Structured extraction**: name, email, phone, location, companies, titles, education, skills
+- **Document input support**: parse raw text, PDF, or DOCX
 - **ATS scoring**: completeness score with actionable issues list
 - **Seniority inference**: from job titles + years of experience
 - **Country detection**: from location + phone prefix
 - **Experience years**: computed from employment dates
 - **100% local**: runs offline via ONNX, no API calls
-- **Fast**: ~15ms per resume after model load
+- **Fast text parsing**: ~15ms per resume after model load
+- **Optional document parsing**: PDF via Kreuzberg, including OCR when enabled; DOCX via Kreuzberg
 
 ## Model
 
@@ -41,9 +43,17 @@ Model directory should include:
 ## Usage
 
 ```typescript
-import { parseResume, computeATSScore } from "resume-extract";
+import {
+  computeATSScore,
+  parseResume,
+  parseResumeDocx,
+  parseResumePdf,
+} from "resume-extract";
 
 const result = await parseResume(resumeText, "/path/to/model");
+const fromPdf = await parseResumePdf("/path/to/resume.pdf", "/path/to/model");
+const fromScannedPdf = await parseResumePdf(pdfBytes, "/path/to/model", { ocr: true });
+const fromDocx = await parseResumeDocx("/path/to/resume.docx", "/path/to/model");
 
 // result.personal: { name, email, phone, location }
 // result.experience: [{ title, company, start_date, end_date }]
@@ -66,6 +76,12 @@ bun install
 # Download model from HuggingFace
 hf download oksomu/resume-ner --local-dir ./model
 ```
+
+Notes:
+
+- `parseResume()` is text-only fast path.
+- `parseResumePdf()` and `parseResumeDocx()` use `@kreuzberg/node` for local document text extraction.
+- `parseResumePdf(..., { ocr: true })` enables Tesseract OCR for scanned PDFs. OCR is much slower than text parsing and may require Tesseract runtime on host machine.
 
 ## Development
 

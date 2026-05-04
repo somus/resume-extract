@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline, type TokenClassificationPipeline } from "@huggingface/transformers";
 
@@ -33,7 +34,7 @@ interface Education {
 	institution?: string;
 }
 
-interface ParsedResume {
+export interface ParsedResume {
 	personal: Personal;
 	experience: Experience[];
 	education: Education[];
@@ -45,21 +46,33 @@ interface ParsedResume {
 	_rawText: string;
 }
 
-interface ATSIssue {
+export interface ATSIssue {
 	severity: "high" | "medium" | "low";
 	message: string;
 }
 
-interface ATSCategoryDetail {
+export interface ATSCategoryDetail {
 	score: number;
 	max: number;
 	[key: string]: unknown;
 }
 
-interface ATSResult {
+export interface ATSResult {
 	score: number;
 	details: Record<string, ATSCategoryDetail>;
 	issues: ATSIssue[];
+}
+
+export type ResumeDocumentInput = Uint8Array | string;
+
+interface PdfOCROptions {
+	backend?: "tesseract";
+	language?: string;
+	dpi?: number;
+}
+
+export interface PdfTextExtractionOptions {
+	ocr?: boolean | PdfOCROptions;
 }
 
 // State
@@ -520,6 +533,80 @@ function cleanPhone(phone: string): string {
 }
 
 // ============================================================
+// DOCUMENT EXTRACTION
+// ============================================================
+
+async function loadKreuzberg() {
+	try {
+		return await import("@kreuzberg/node");
+	} catch (error) {
+		throw new Error(
+			`Document parsing requires @kreuzberg/node. Install dependency or use parseResume() with pre-extracted text.`,
+			{ cause: error },
+		);
+	}
+}
+
+async function withDocumentPath<T>(
+	input: ResumeDocumentInput,
+	extension: "pdf" | "docx",
+	run: (filePath: string) => T | Promise<T>,
+): Promise<T> {
+	if (typeof input === "string") return await run(input);
+
+	const tempPath = join(tmpdir(), `resume-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`);
+	writeFileSync(tempPath, input);
+
+	try {
+		return await run(tempPath);
+	} finally {
+		try {
+			unlinkSync(tempPath);
+		} catch {
+			// Ignore temp cleanup failures.
+		}
+	}
+}
+
+function buildPdfExtractOptions(options?: PdfTextExtractionOptions) {
+	if (!options?.ocr) return undefined;
+	if (options.ocr === true) {
+		return {
+			ocr: {
+				backend: "tesseract" as const,
+				language: "eng",
+				dpi: 150,
+			},
+		};
+	}
+	return {
+		ocr: {
+			backend: options.ocr.backend || "tesseract",
+			language: options.ocr.language || "eng",
+			dpi: options.ocr.dpi || 150,
+		},
+	};
+}
+
+async function extractTextFromDocument(
+	input: ResumeDocumentInput,
+	format: "pdf" | "docx",
+	pdfOptions?: PdfTextExtractionOptions,
+): Promise<string> {
+	const { extractFileSync } = await loadKreuzberg();
+	const extractOptions = format === "pdf" ? buildPdfExtractOptions(pdfOptions) : undefined;
+	const label = format.toUpperCase();
+
+	return await withDocumentPath(input, format, (filePath) => {
+		const result = extractFileSync(filePath, null, extractOptions);
+		if (!result.content || result.content.trim().length === 0) {
+			throw new Error(`Could not extract text from ${label} — file may be empty or unreadable`);
+		}
+		return result.content;
+	});
+}
+
+// ============================================================
 // PUBLIC API
 // ============================================================
 
@@ -546,6 +633,31 @@ export async function parseResume(text: string, modelPath: string): Promise<Pars
 		experience_years: years,
 		_rawText: text,
 	};
+}
+
+export async function extractTextFromPdf(
+	input: ResumeDocumentInput,
+	options?: PdfTextExtractionOptions,
+): Promise<string> {
+	return await extractTextFromDocument(input, "pdf", options);
+}
+
+export async function extractTextFromDocx(input: ResumeDocumentInput): Promise<string> {
+	return await extractTextFromDocument(input, "docx");
+}
+
+export async function parseResumePdf(
+	input: ResumeDocumentInput,
+	modelPath: string,
+	options?: PdfTextExtractionOptions,
+): Promise<ParsedResume> {
+	const text = await extractTextFromPdf(input, options);
+	return await parseResume(text, modelPath);
+}
+
+export async function parseResumeDocx(input: ResumeDocumentInput, modelPath: string): Promise<ParsedResume> {
+	const text = await extractTextFromDocx(input);
+	return await parseResume(text, modelPath);
 }
 
 export function computeATSScore(parsed: ParsedResume): ATSResult {

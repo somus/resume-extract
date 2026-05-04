@@ -1,18 +1,19 @@
 {
 	"name": "resume-extract",
 	"version": "0.1.0",
-	"description": "Extract structured data from resume text using ONNX NER model",
+	"description": "Extract structured data from resume text, PDF, and DOCX using ONNX NER model",
 	"main": "src/index.ts",
 	"type": "module",
 	"scripts": {
-		"test": "bun run src/index.test.ts",
+		"test": "bun test",
 		"check": "biome check .",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@huggingface/transformers": "^4.2.0"
+		"@huggingface/transformers": "^4.2.0",
+		"@kreuzberg/node": "^4.9.5"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.14",
