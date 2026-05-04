@@ -14,11 +14,29 @@ Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts 
 
 ## Model
 
-Uses [`oksomu/resume-ner`](https://huggingface.co/oksomu/resume-ner) — a DistilBERT model fine-tuned on 4300+ resumes across 14 industries.
+Uses [`oksomu/resume-ner`](https://huggingface.co/oksomu/resume-ner) — a DistilBERT model fine-tuned for resume NER and exported to ONNX for local structured extraction.
 
-- F1: 98.1% | Precision: 99.1% | Recall: 97.0%
-- 13 entity types: NAME, EMAIL, PHONE, LOCATION, COMPANY, TITLE, DATE, DEGREE, INSTITUTION, FIELD, SKILL, CERT, LANGUAGE
-- 63MB quantized ONNX
+Latest published model metrics:
+
+- entity F1: 97.27%
+- entity precision: 96.76%
+- entity recall: 97.78%
+- internal structured micro F1: 97.58%
+- internal structured macro F1: 98.12%
+- clean-resume structured micro F1: 99.44%
+- noisy-resume structured micro F1: 60.91%
+- quantized ONNX size: 63MB
+
+Entity types:
+
+- NAME, EMAIL, PHONE, LOCATION, COMPANY, TITLE, DATE, DEGREE, INSTITUTION, FIELD, SKILL, CERT, LANGUAGE
+
+Model directory should include:
+
+- `resume_config.json`
+- `companies.json`
+- tokenizer/config files
+- `onnx/model_quantized.onnx` or `onnx/model.onnx`
 
 ## Usage
 
