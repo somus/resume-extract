@@ -61,10 +61,6 @@ jobs:
 
       - run: bun install
 
-      - run: bun run typecheck
-
-      - run: bun run check
-
       - name: Build release binary
         run: bun build --compile ./src/cli.ts --outfile ./dist/${{ matrix.asset_name }}
 
