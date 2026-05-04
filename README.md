@@ -18,15 +18,12 @@ Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts 
 
 Uses [`oksomu/resume-ner`](https://huggingface.co/oksomu/resume-ner) — a DistilBERT model fine-tuned for resume NER and exported to ONNX for local structured extraction.
 
-Latest published model metrics:
+Latest model metrics (noise-augmented, 25 epochs, entity-level exact-match via seqeval):
 
-- entity F1: 97.27%
-- entity precision: 96.76%
-- entity recall: 97.78%
-- internal structured micro F1: 97.58%
-- internal structured macro F1: 98.12%
-- clean-resume structured micro F1: 99.44%
-- noisy-resume structured micro F1: 60.91%
+- entity F1: 97.62%
+- structured micro F1: 98.16%
+- long resume micro F1: 91.7% (resumes >512 tokens, section-aware chunked inference)
+- noisy resume F1: 72.67% (OCR/scraped text)
 - quantized ONNX size: 63MB
 
 Entity types:
@@ -35,8 +32,9 @@ Entity types:
 
 Model directory should include:
 
-- `resume_config.json`
-- `companies.json`
+- `resume_config.json` — pre-processing, post-processing, and inference rules
+- `companies.json` — company gazetteer for post-processing
+- `city_country_map.json` — 317 cities for country inference
 - tokenizer/config files
 - `onnx/model_quantized.onnx` or `onnx/model.onnx`
 
@@ -68,20 +66,110 @@ const ats = computeATSScore(result);
 // ats.issues: [{ severity: "medium", message: "..." }]
 ```
 
+## CLI
+
+Run directly with Bun:
+
+```bash
+ bun run cli ./resume.pdf --ats
+ bun run cli --text "Jane Doe..."
+ bun run cli ./resume.pdf --view json --output result.json
+cat ./resume.txt | bun run cli
+
+# Batch mode
+bun run cli batch ./resumes/*.pdf --ats
+bun run cli batch --input-dir ./resumes --glob '**/*' --output batch.jsonl
+bun run cli batch --input-dir ./resumes --output batch.csv --output-format csv
+bun run cli batch --input-dir ./resumes --fail-fast
+
+# Explicit model setup and diagnostics
+bun run cli setup-model
+bun run cli doctor --ocr
+bun run cli doctor --fix
+bun run cli doctor --json
+```
+
+Common flags:
+
+- `--model <path>`: model directory
+- `--model-repo <repo>`: alternate Hugging Face repo for first-run download
+- `--model-revision <rev>`: alternate model revision for first-run download
+- `--no-download`: disable automatic model download
+- `--input <path>`: input file path
+- `--text <text>`: inline text input
+- `--format <auto|text|pdf|docx>`: override format detection
+- `--ocr`: enable PDF OCR (defaults to Tesseract)
+- `--ocr-backend <backend>`: OCR backend: `tesseract`, `easyocr`, or `paddleocr`
+- `--ats`: include ATS scoring in output
+- `--view <json|pretty>`: render machine JSON or human-friendly terminal output
+- `--output <path>`: write structured output to a file
+- `--compact`: emit minified JSON
+
+Batch-only flags:
+
+- `batch [inputs...]`: process many resumes at once
+- `--input-dir <path>`: scan a directory for resumes
+- `--glob <pattern>`: file selection pattern for directory scanning
+- `--concurrency <n>`: parallel batch workers, defaults to `4`
+- `--fail-fast`: stop batch processing on the first extraction error
+- `--output-format <json|jsonl|csv>`: structured batch output format
+
+Extra commands:
+
+- `setup-model`: download the configured model into the local cache or custom `--model` path
+- `doctor`: inspect model readiness, file integrity, writable cache paths, runtime platform, and optional OCR availability
+- `doctor --fix`: download/repair the configured model, then report status
+- `doctor --json`: emit machine-readable diagnostics
+
+Build a single Bun binary:
+
+```bash
+bun run build:bin
+./dist/resume-extract --input ./resume.pdf --ats
+```
+
+Install the latest released binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
+resume-extract --help
+```
+
+The installer downloads the latest GitHub Release asset into `~/.local/bin`. Override `INSTALL_DIR`, `REPO`, or `VERSION` if needed:
+
+```bash
+INSTALL_DIR=/usr/local/bin VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
+```
+
+On first run, the CLI automatically downloads the required `oksomu/resume-ner` model files into a local cache if they are missing and shows download progress. Pass `--model` to use a custom directory or `--no-download` to require a pre-populated model directory.
+
+Output behavior:
+
+- Single resume commands default to `pretty` view on a TTY and `json` otherwise.
+- Batch commands default to `pretty` summaries on a TTY and structured JSON otherwise.
+- Use `--view json` when piping to other tools.
+- Use `--output` with `batch` plus `--output-format jsonl` for machine-friendly bulk processing.
+- Use `--output-format csv` when you want spreadsheet-friendly flat output with summary fields plus numbered experience and education columns.
+
 ## Setup
 
 ```bash
 bun install
-
-# Download model from HuggingFace
-hf download oksomu/resume-ner --local-dir ./model
 ```
 
 Notes:
 
 - `parseResume()` is text-only fast path.
 - `parseResumePdf()` and `parseResumeDocx()` use `@kreuzberg/node` for local document text extraction.
-- `parseResumePdf(..., { ocr: true })` enables Tesseract OCR for scanned PDFs. OCR is much slower than text parsing and may require Tesseract runtime on host machine.
+- `parseResumePdf(..., { ocr: true })` enables OCR for scanned PDFs (defaults to Tesseract). Supports `tesseract`, `easyocr`, and `paddleocr` backends via `{ ocr: { backend: "easyocr" } }`. OCR is much slower than text parsing.
+- The CLI downloads models automatically by default; library consumers should still manage model directories explicitly.
+
+## Limitations
+
+- English resumes only
+- Max 512 tokens per chunk (section-aware chunking handles longer resumes)
+- Image-based/scanned PDFs require OCR before text extraction
+- Two-column PDF layouts may flatten during text extraction
 
 ## Development
 
