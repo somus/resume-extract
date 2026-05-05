@@ -1,12 +1,14 @@
 import { computeATSScore } from "./ats";
+import { chunkText } from "./chunking";
 import { extractTextFromDocx, extractTextFromPdf } from "./document";
 import { groupIntoEntries } from "./grouping";
 import { computeYears, inferCountry, inferSeniority } from "./inference";
 import { applyPostProcessing, cleanEntity, mergeSubwords } from "./postprocess";
 import { preprocessResumeText } from "./preprocess";
 import { loadRuntime } from "./runtime";
+import { fillMissingEntities } from "./section-detection";
 import { cleanSpaces } from "./strings";
-import type { NERToken, ParsedResume, PdfTextExtractionOptions, ResumeDocumentInput } from "./types";
+import type { NERToken, ParsedResume, PdfTextExtractionOptions, ResumeDocumentInput, Span } from "./types";
 
 export type {
 	ATSCategoryDetail,
@@ -27,11 +29,19 @@ export async function parseResume(text: string, modelPath: string): Promise<Pars
 	const context = { config: runtime.config, companies: runtime.companies };
 	const preprocessedText = preprocessResumeText(runtime.config, text);
 
-	let spans = mergeSubwords((await runtime.pipeline(preprocessedText)) as NERToken[]);
+	const chunks = chunkText(preprocessedText, runtime.tokenizer);
+	let spans: Span[] = [];
+	for (const chunk of chunks) {
+		const chunkSpans = mergeSubwords((await runtime.pipeline(chunk.text)) as NERToken[]);
+		for (const span of chunkSpans) {
+			spans.push({ ...span, start: span.start + chunk.offset, end: span.end + chunk.offset });
+		}
+	}
 	spans = spans
 		.map((span) => ({ ...span, text: cleanEntity(context, span.label, span.text) || "" }))
 		.filter((span) => span.text.length > 0);
 	spans = applyPostProcessing(context, spans);
+	spans = fillMissingEntities(preprocessedText, spans);
 
 	const grouped = groupIntoEntries(context, spans);
 	const years = computeYears(runtime.config, grouped.experiences);

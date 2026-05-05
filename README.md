@@ -2,6 +2,42 @@
 
 Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts structured data from resume text, PDF, or DOCX via local document parsing + ONNX inference.
 
+## Installation
+
+**Binary (recommended):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
+resume-extract --help
+```
+
+The installer downloads the latest GitHub Release asset into `~/.local/bin`. Override `INSTALL_DIR`, `REPO`, or `VERSION` if needed:
+
+```bash
+INSTALL_DIR=/usr/local/bin VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
+```
+
+**As library:**
+
+```bash
+bun install
+```
+
+**Build from source:**
+
+```bash
+bun run build:bin
+./dist/resume-extract --input ./resume.pdf --ats
+```
+
+Notes:
+
+- `parseResume()` is text-only fast path.
+- `parseResumePdf()` and `parseResumeDocx()` use `@kreuzberg/node` for local document text extraction.
+- `parseResumePdf(..., { ocr: true })` enables OCR for scanned PDFs (defaults to Tesseract). Supports `tesseract`, `easyocr`, and `paddleocr` backends via `{ ocr: { backend: "easyocr" } }`. OCR is much slower than text parsing.
+- On first run, the CLI automatically downloads the required `oksomu/resume-ner` model files into a local cache if they are missing and shows download progress. Pass `--model` to use a custom directory or `--no-download` to require a pre-populated model directory.
+- Library consumers should manage model directories explicitly.
+
 ## Features
 
 - **Structured extraction**: name, email, phone, location, companies, titles, education, skills
@@ -10,6 +46,8 @@ Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts 
 - **Seniority inference**: from job titles + years of experience
 - **Country detection**: from location + phone prefix
 - **Experience years**: computed from employment dates
+- **Section-aware chunking**: splits long resumes at paragraph boundaries for >512 token texts
+- **Section detection**: rule-based gap-filling for skills, certifications, and languages the model misses
 - **100% local**: runs offline via ONNX, no API calls
 - **Fast text parsing**: ~15ms per resume after model load
 - **Optional document parsing**: PDF via Kreuzberg, including OCR when enabled; DOCX via Kreuzberg
@@ -18,12 +56,12 @@ Fast, local resume extraction using a fine-tuned DistilBERT NER model. Extracts 
 
 Uses [`oksomu/resume-ner`](https://huggingface.co/oksomu/resume-ner) — a DistilBERT model fine-tuned for resume NER and exported to ONNX for local structured extraction.
 
-Latest model metrics (noise-augmented, 25 epochs, entity-level exact-match via seqeval):
+Latest model metrics (from [model card](https://huggingface.co/oksomu/resume-ner), noise-augmented, 25 epochs, entity-level exact-match via seqeval):
 
-- entity F1: 97.62%
-- structured micro F1: 98.16%
-- long resume micro F1: 91.7% (resumes >512 tokens, section-aware chunked inference)
-- noisy resume F1: 72.67% (OCR/scraped text)
+- entity F1: 97.77%
+- structured micro F1: 97.88%
+- clean resume F1: 99.18%
+- noisy resume F1: 69.24% (OCR/scraped text)
 - quantized ONNX size: 63MB
 
 Entity types:
@@ -117,31 +155,12 @@ Batch-only flags:
 Extra commands:
 
 - `setup-model`: download the configured model into the local cache or custom `--model` path
+- `update-model`: pull the latest model from Hugging Face, re-downloading all files
 - `doctor`: inspect model readiness, file integrity, writable cache paths, runtime platform, and optional OCR availability
 - `doctor --fix`: download/repair the configured model, then report status
 - `doctor --json`: emit machine-readable diagnostics
 
-Build a single Bun binary:
-
-```bash
-bun run build:bin
-./dist/resume-extract --input ./resume.pdf --ats
-```
-
-Install the latest released binary:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
-resume-extract --help
-```
-
-The installer downloads the latest GitHub Release asset into `~/.local/bin`. Override `INSTALL_DIR`, `REPO`, or `VERSION` if needed:
-
-```bash
-INSTALL_DIR=/usr/local/bin VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/somus/resume-extract/main/scripts/install-release.sh | bash
-```
-
-On first run, the CLI automatically downloads the required `oksomu/resume-ner` model files into a local cache if they are missing and shows download progress. Pass `--model` to use a custom directory or `--no-download` to require a pre-populated model directory.
+The CLI checks for model updates once per day. If a newer model is available on Hugging Face, a warning is shown on stderr. Run `update-model` to pull the latest.
 
 Output behavior:
 
@@ -151,23 +170,10 @@ Output behavior:
 - Use `--output` with `batch` plus `--output-format jsonl` for machine-friendly bulk processing.
 - Use `--output-format csv` when you want spreadsheet-friendly flat output with summary fields plus numbered experience and education columns.
 
-## Setup
-
-```bash
-bun install
-```
-
-Notes:
-
-- `parseResume()` is text-only fast path.
-- `parseResumePdf()` and `parseResumeDocx()` use `@kreuzberg/node` for local document text extraction.
-- `parseResumePdf(..., { ocr: true })` enables OCR for scanned PDFs (defaults to Tesseract). Supports `tesseract`, `easyocr`, and `paddleocr` backends via `{ ocr: { backend: "easyocr" } }`. OCR is much slower than text parsing.
-- The CLI downloads models automatically by default; library consumers should still manage model directories explicitly.
-
 ## Limitations
 
 - English resumes only
-- Max 512 tokens per chunk (section-aware chunking handles longer resumes)
+- Max 512 tokens per chunk (section-aware chunking splits at paragraph boundaries for longer resumes)
 - Image-based/scanned PDFs require OCR before text extraction
 - Two-column PDF layouts may flatten during text extraction
 

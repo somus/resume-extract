@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const DEFAULT_MODEL_REPO = "oksomu/resume-ner";
@@ -194,6 +194,132 @@ export async function ensureModelReady(options: ModelBootstrapOptions): Promise<
 		await downloadFile(modelPath, repoId, revision, file, index + 1, REQUIRED_MODEL_FILES.length);
 	}
 
+	const remoteSha = await fetchRemoteSha(repoId, revision);
+	if (remoteSha) {
+		writeFileSync(join(modelPath, ".commit-sha"), remoteSha);
+		writeUpdateCheckState(modelPath, { lastCheck: Date.now(), localSha: remoteSha, remoteSha });
+	}
+
 	process.stderr.write(`Model ready at ${modelPath}\n`);
+	return modelPath;
+}
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CHECK_FILE = ".update-check.json";
+
+interface UpdateCheckState {
+	lastCheck: number;
+	localSha: string | null;
+	remoteSha: string | null;
+}
+
+function getUpdateCheckPath(modelPath: string): string {
+	return join(modelPath, UPDATE_CHECK_FILE);
+}
+
+function readUpdateCheckState(modelPath: string): UpdateCheckState | null {
+	const path = getUpdateCheckPath(modelPath);
+	if (!existsSync(path)) return null;
+	try {
+		return JSON.parse(readFileSync(path, "utf-8"));
+	} catch {
+		return null;
+	}
+}
+
+function writeUpdateCheckState(modelPath: string, state: UpdateCheckState): void {
+	const path = getUpdateCheckPath(modelPath);
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(state));
+}
+
+async function fetchRemoteSha(repoId: string, revision: string): Promise<string | null> {
+	try {
+		const response = await fetch(`https://huggingface.co/api/models/${repoId}/revision/${revision}`, {
+			signal: AbortSignal.timeout(5000),
+		});
+		if (!response.ok) return null;
+		const data = (await response.json()) as { sha?: string };
+		return data.sha ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function getLocalSha(modelPath: string): string | null {
+	const refsPath = join(modelPath, ".commit-sha");
+	if (existsSync(refsPath)) {
+		return readFileSync(refsPath, "utf-8").trim();
+	}
+	return null;
+}
+
+export interface UpdateCheckResult {
+	updateAvailable: boolean;
+	localSha: string | null;
+	remoteSha: string | null;
+}
+
+export async function checkForModelUpdate(
+	modelPath: string,
+	repoId = DEFAULT_MODEL_REPO,
+	revision = DEFAULT_MODEL_REVISION,
+): Promise<UpdateCheckResult | null> {
+	const state = readUpdateCheckState(modelPath);
+	const now = Date.now();
+
+	if (state && now - state.lastCheck < UPDATE_CHECK_INTERVAL_MS) {
+		if (state.remoteSha && state.localSha && state.remoteSha !== state.localSha) {
+			return { updateAvailable: true, localSha: state.localSha, remoteSha: state.remoteSha };
+		}
+		return null;
+	}
+
+	const remoteSha = await fetchRemoteSha(repoId, revision);
+	const localSha = getLocalSha(modelPath);
+	const newState: UpdateCheckState = { lastCheck: now, localSha, remoteSha };
+	writeUpdateCheckState(modelPath, newState);
+
+	if (remoteSha && localSha && remoteSha !== localSha) {
+		return { updateAvailable: true, localSha, remoteSha };
+	}
+	return null;
+}
+
+export async function updateModel(options: ModelBootstrapOptions): Promise<string> {
+	const modelPath = options.modelPath;
+	const repoId = options.repoId || DEFAULT_MODEL_REPO;
+	const revision = options.revision || DEFAULT_MODEL_REVISION;
+	mkdirSync(modelPath, { recursive: true });
+
+	const remoteSha = await fetchRemoteSha(repoId, revision);
+	const localSha = getLocalSha(modelPath);
+
+	if (remoteSha && localSha && remoteSha === localSha) {
+		process.stderr.write(`Model already up to date (${localSha.slice(0, 8)}).\n`);
+		writeUpdateCheckState(modelPath, { lastCheck: Date.now(), localSha, remoteSha });
+		return modelPath;
+	}
+
+	process.stderr.write(`Updating model from ${repoId}@${revision}...\n`);
+	for (let index = 0; index < REQUIRED_MODEL_FILES.length; index++) {
+		const file = REQUIRED_MODEL_FILES[index];
+		await downloadFile(modelPath, repoId, revision, file, index + 1, REQUIRED_MODEL_FILES.length);
+	}
+
+	const inspection = inspectModelFiles(modelPath);
+	if (inspection.missingFiles.length > 0 || inspection.zeroByteFiles.length > 0) {
+		throw new Error(
+			`Model update incomplete: missing=[${inspection.missingFiles.join(", ")}] zero-byte=[${inspection.zeroByteFiles.join(", ")}]`,
+		);
+	}
+
+	const newSha = remoteSha || (await fetchRemoteSha(repoId, revision));
+	if (newSha) {
+		writeFileSync(join(modelPath, ".commit-sha"), newSha);
+		writeUpdateCheckState(modelPath, { lastCheck: Date.now(), localSha: newSha, remoteSha: newSha });
+	}
+
+	process.stderr.write(`Model updated at ${modelPath}\n`);
 	return modelPath;
 }

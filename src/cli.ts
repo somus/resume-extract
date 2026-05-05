@@ -12,11 +12,13 @@ import {
 } from "./cli-render";
 import { computeATSScore, extractTextFromPdf, parseResume, parseResumeDocx, parseResumePdf } from "./index";
 import {
+	checkForModelUpdate,
 	ensureModelReady,
 	getDefaultModelPath,
 	getModelDownloadTarget,
 	inspectModelFiles,
 	isModelReady,
+	updateModel,
 } from "./model-bootstrap";
 import type { ParsedResume, PdfTextExtractionOptions } from "./types";
 
@@ -432,6 +434,17 @@ async function runWithConcurrency<TInput, TResult>(
 	return results;
 }
 
+async function warnIfModelOutdated(modelPath: string, repoId?: string, revision?: string) {
+	try {
+		const result = await checkForModelUpdate(modelPath, repoId, revision);
+		if (result?.updateAvailable) {
+			process.stderr.write(
+				`\x1b[33m⚠ A newer model is available on Hugging Face. Run \`resume-extract update-model\` to update.\x1b[0m\n`,
+			);
+		}
+	} catch {}
+}
+
 async function runExtract(positionalInput: string | undefined, options: ExtractCommandOptions) {
 	const resolved = resolveExtractOptions(positionalInput, options);
 	const modelPath = await ensureModelReady({
@@ -440,6 +453,7 @@ async function runExtract(positionalInput: string | undefined, options: ExtractC
 		revision: resolved.modelRevision,
 		allowDownload: resolved.allowDownload,
 	});
+	await warnIfModelOutdated(modelPath, resolved.modelRepo, resolved.modelRevision);
 	const parsed = await parseInput(resolved, modelPath);
 	const result: CliExtractResult = {
 		input: resolved.inputPath ? resolve(resolved.inputPath) : undefined,
@@ -476,6 +490,7 @@ async function runBatch(inputs: string[], options: BatchCommandOptions) {
 		revision: resolved.modelRevision,
 		allowDownload: resolved.allowDownload,
 	});
+	await warnIfModelOutdated(modelPath, resolved.modelRepo, resolved.modelRevision);
 
 	let completed = 0;
 	const results = await runWithConcurrency(
@@ -536,6 +551,15 @@ async function runSetupModel(options: SetupModelCommandOptions) {
 		allowDownload: true,
 	});
 	process.stdout.write(`Model ready at ${modelPath}\n`);
+}
+
+async function runUpdateModel(options: SetupModelCommandOptions) {
+	const modelPath = await updateModel({
+		modelPath: commandModelPath(options.model),
+		repoId: options.modelRepo,
+		revision: options.modelRevision,
+	});
+	process.stdout.write(`Model updated at ${modelPath}\n`);
 }
 
 export async function buildDoctorReport(options: DoctorCommandOptions): Promise<DoctorReport> {
@@ -663,6 +687,15 @@ export function createCli() {
 		.option("--model-revision <revision>", "Hugging Face revision to download, defaults to main")
 		.action(async (options) => {
 			await runSetupModel(options as SetupModelCommandOptions);
+		});
+
+	cli
+		.command("update-model", "Pull the latest model from Hugging Face")
+		.option("--model <path>", "Path to the resume-ner model directory")
+		.option("--model-repo <repo>", "Hugging Face repo to pull from")
+		.option("--model-revision <revision>", "Hugging Face revision to pull, defaults to main")
+		.action(async (options) => {
+			await runUpdateModel(options as SetupModelCommandOptions);
 		});
 
 	cli

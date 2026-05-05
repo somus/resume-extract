@@ -1,9 +1,10 @@
-import type { TokenClassificationPipeline } from "@huggingface/transformers";
+import type { PreTrainedTokenizer, TokenClassificationPipeline } from "@huggingface/transformers";
 import { loadCompanies, loadResumeConfig } from "./config";
 import type { ResumeConfig } from "./types";
 
-interface RuntimeResources {
+export interface RuntimeResources {
 	pipeline: TokenClassificationPipeline;
+	tokenizer: PreTrainedTokenizer | null;
 	config: ResumeConfig;
 	companies: Set<string>;
 }
@@ -32,8 +33,14 @@ export async function loadRuntime(modelPath: string): Promise<RuntimeResources> 
 	if (!cachedConfig) cachedConfig = loadResumeConfig(modelPath);
 	if (!cachedCompanies) cachedCompanies = loadCompanies(modelPath);
 
+	const pipe = await loadPipeline(modelPath);
+	const tokenizer = (pipe as unknown as { tokenizer?: PreTrainedTokenizer }).tokenizer ?? null;
+	if (!tokenizer) {
+		process.stderr.write("Warning: could not extract tokenizer from pipeline; chunking disabled for long resumes.\n");
+	}
 	return {
-		pipeline: await loadPipeline(modelPath),
+		pipeline: pipe,
+		tokenizer,
 		config: cachedConfig,
 		companies: cachedCompanies,
 	};

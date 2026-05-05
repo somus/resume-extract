@@ -1,6 +1,6 @@
 {
 	"name": "resume-extract",
-	"version": "0.2.2",
+	"version": "0.3.0",
 	"description": "Extract structured data from resume text, PDF, and DOCX using ONNX NER model",
 	"repository": {
 		"type": "git",
